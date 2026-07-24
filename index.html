@@ -1,1 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home Air Metrics Dashboard</title>
+    <!-- Load Chart.js for graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f7f6; color: #333; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+      #login-container, #dashboard { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 800px; }
+      h2 { margin-top: 0; }
+      input { display: block; width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+      button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 10px; }
+      button:hover { background: #0056b3; }
+      #logout-btn { background: #dc3545; float: right; margin-top: 0; }
+      .chart-container { position: relative; height: 40vh; width: 100%; margin-bottom: 40px; }
+      .hidden { display: none !important; }
+    </style>
+  </head>
 
+  <body>
+
+    <!-- Login Screen -->
+    <div id="login-container">
+      <h2>Dashboard Login</h2>
+      <p>Please log in to view live room sensor data.</p>
+      <input type="email" id="email" placeholder="yourname@example.com">
+      <input type="password" id="password" placeholder="Password">
+      <button id="login-btn">Log In</button>
+      <p id="error-msg" style="color:red; font-size:14px;"></p>
+    </div>
+
+    <!-- Dashboard Screen (Hidden by default) -->
+    <div id="dashboard" class="hidden">
+      <button id="logout-btn">Log Out</button>
+      <h2>Room Monitor Dashboard</h2>
+
+      <div class="chart-container">
+        <canvas id="envChart"></canvas>
+      </div>
+      <div class="chart-container">
+        <canvas id="airChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Firebase -->
+    <script type="module">
+      // Import the functions you need from the SDKs you need
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+      import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+      import { getDatabase, ref, onValue, query, limitToLast } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+      
+      const firebaseConfig = {
+        apiKey: "AIzaSyDFAOF4njAN7R6yDvG_LGo4npgs2ydRBpw",
+        authDomain: "sensor-home-conditions.firebaseapp.com",
+        databaseURL: "https://sensor-home-conditions-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "sensor-home-conditions",
+        storageBucket: "sensor-home-conditions.firebasestorage.app",
+        messagingSenderId: "581747220591",
+        appId: "1:581747220591:web:d5047064c015e5e8c52d9a",
+        measurementId: "G-76WWLEPVKM"
+      };
+    
+      // Initialize Firebase
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      const db = getDatabase(app);
+
+      const loginContainer = document.getElementById('login-container');
+      const dashboard = document.getElementById('dashboard');
+      const errorMsg = document.getElementById('error-msg');
+
+      let envChart, airChart
+
+      //Authentication Logic
+      document.getElementById('login-btn').addEventListener('click', () => {
+        const email = document.getElementById('email').value;
+        const pass = document.getElementById('password').value;
+        errorMsg.innerText = "Logging in...";
+
+        signInWithEmailAndPassword(auth, email, pass).catch((error) => { errorMsg.innerText = error.message; });
+      });
+
+      document.getElementById('logout-btn').addEventListener('click', () => {
+        signOut(auth);
+      });
+
+      onAuthStateChanged(auth, (user) => {
+        if (user) {
+          loginContainer.classList.add('hidden');
+          dashboard.classList.remove('hidden');
+          if  (!envChart) initCharts();
+          startDataListener();
+        } else {
+          loginContainer.classList.remove('hidden');
+          dashboard.classList.add('hidden');
+        }
+      });
+
+      // Charts and Data
+
+      function initCharts() {
+        const ctxEnv = document.getElementById('envChart').getContext('2d');
+        const ctxAir = document.getElementById('airChart').getContext('2d');
+  
+        envChart = new Chart(ctxEnv, {
+          type: 'line',
+          data: { labels: [], datasets: [
+            { label: 'Temp (ºC)', borderColor: '#ff6384', data: [], tension: 0.4 },
+            { label: 'Humidity (%)', borderColor: '#36a2eb', data: [], tension: 0.4 }
+          ]},
+          options: { responsive: true, maintainAspectRatio: false }
+        });
+  
+        airChart = new Chart(ctxAir, {
+          type: 'line',
+          data: { labels: [], datasets: [
+            { label: 'PM2.5 (µg/m³)', borderColor: '#9966ff', data: [], tension: 0.4 },
+            { label: 'Gas Resistance (kOhms)', borderColor: '#4bc0c0', data: [], tension: 0.4 }
+          ]},
+          options: { responsive: true, maintainAspectRatio: false }
+        });
+      }
+  
+      function startDataListener() {
+        //Pull the last 30 readings from Firebase 'room_data' node
+        const dataRef = query(ref(db, 'room_data'), limitToLast(30));
+  
+        onValue(dataRef, (snapshot) => {
+          const labels = [];
+          const temps = [], hums = [], pms = [], gases = [];
+  
+          snapshot.forEach((childSnapshot) => {
+            const data = childSnapshot.val();
+            //Convert UNIX timestamp from ESP8266 to local time string
+            const timeString = new Date(data.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  
+            labels.push(timeString);
+            temps.push(data.temperature);
+            hums.push(data.humidity);
+            pms.push(data.pm25);
+            gases.push(data.gas / 1000);
+        });
+  
+        //Update Charts
+        envChart.data.labels = labels;
+        envChart.data.datasets[0].data = temps;
+        envChart.data.datasets[1].data = hums;
+        envChart.update();
+  
+        airChart.data.labels = labels;
+        airChart.data.datasets[0].data = pms;
+        airChart.data.datasets[1].data = gases;
+        airChart.update();
+      });
+    }
+    </script>
+  </body>
+</html>
