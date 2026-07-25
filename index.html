@@ -16,6 +16,14 @@
       #logout-btn { background: #dc3545; float: right; margin-top: 0; }
       .chart-container { position: relative; height: 40vh; width: 100%; margin-bottom: 40px; }
       .hidden { display: none !important; }
+
+      /* New Dashboard Badge Styles */
+      .dashboard-grid { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 30px; }
+      .sensor-card { background: #f4f4f9; padding: 20px; border-radius: 8px; flex: 1; min-width: 200px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+      .sensor-card h3 { margin-top: 0; font-size: 1.1em; color: #555; }
+      .eaqi-badge { padding: 6px 12px; border-radius: 12px; font-weight: bold; color: white; display: inline-block; margin-bottom: 15px; }
+      .data-value { font-size: 1.5em; font-weight: bold; color: #333; }
+      .timestamp { font-size: 0.9em; color: #666; margin-bottom: 20px; font-weight: bold; }
     </style>
   </head>
 
@@ -35,7 +43,37 @@
     <div id="dashboard" class="hidden">
       <button id="logout-btn">Log Out</button>
       <h2>Room Monitor Dashboard</h2>
+      
+      <div class="timestamp">
+        Last Updated: <span id="time-updated">Waiting for data...</span>
+      </div>
 
+      <!-- Live Status Badges -->
+      <div class="dashboard-grid">
+        <div class="sensor-card">
+          <h3>PM2.5 Air Quality</h3>
+          <div id="pm-badge" class="eaqi-badge" style="background-color: gray;">Waiting...</div>
+          <p>Raw: <span id="pm-raw" class="data-value">--</span> µg/m³</p>
+        </div>
+    
+        <div class="sensor-card">
+          <h3>VOC Air Quality</h3>
+          <div id="voc-badge" class="eaqi-badge" style="background-color: gray;">Waiting...</div>
+          <p>Clean Air: <span id="voc-pct" class="data-value">--</span> %</p>
+          <p style="font-size: 0.8em; color: #777;">Raw Resistance: <span id="gas-raw">--</span> Ω</p>
+        </div>
+    
+        <div class="sensor-card">
+          <h3>Environment</h3>
+          <p>Temp: <span id="temp-val" class="data-value">--</span> °C</p>
+          <p>Hum: <span id="hum-val" class="data-value">--</span> %</p>
+          <p>Pres: <span id="pres-val" class="data-value">--</span> hPa</p>
+        </div>
+      </div>
+
+      <hr style="border: 1px solid #eee; margin-bottom: 30px;">
+
+      <!-- Historical Charts -->
       <div class="chart-container">
         <canvas id="envChart"></canvas>
       </div>
@@ -76,6 +114,29 @@
 
       let envChart, airChart, pressureChart;
 
+      // The official European AQI 1-6 mapping
+      const eaqiScale = {
+        1: { label: "Good", color: "#50F0E6", textColor: "#000" },        
+        2: { label: "Fair", color: "#50CCAA", textColor: "#000" },        
+        3: { label: "Moderate", color: "#F0E641", textColor: "#000" },    
+        4: { label: "Poor", color: "#FF5050", textColor: "#FFF" },        
+        5: { label: "Very Poor", color: "#960032", textColor: "#FFF" },   
+        6: { label: "Extremely Poor", color: "#7D2181", textColor: "#FFF"}
+      };
+
+      function updateEAQIBadge(elementId, indexValue) {
+        const badge = document.getElementById(elementId);
+        const scaleData = eaqiScale[indexValue];
+        if (scaleData) {
+          badge.innerText = scaleData.label;
+          badge.style.backgroundColor = scaleData.color;
+          badge.style.color = scaleData.textColor;
+        } else {
+          badge.innerText = "Unknown";
+          badge.style.backgroundColor = "gray";
+        }
+      }
+
       //Authentication Logic
       document.getElementById('login-btn').addEventListener('click', () => {
         const email = document.getElementById('email').value;
@@ -102,7 +163,6 @@
       });
 
       // Charts and Data
-
       function initCharts() {
         const ctxEnv = document.getElementById('envChart').getContext('2d');
         const ctxAir = document.getElementById('airChart').getContext('2d');
@@ -111,7 +171,7 @@
         envChart = new Chart(ctxEnv, {
           type: 'line',
           data: { labels: [], datasets: [
-            { label: 'Temp (ºC)', borderColor: '#ff6384', data: [], tension: 0.4 },
+            { label: 'Temp (°C)', borderColor: '#ff6384', data: [], tension: 0.4 },
             { label: 'Humidity (%)', borderColor: '#36a2eb', data: [], tension: 0.4 }
           ]},
           options: { responsive: true, maintainAspectRatio: false }
@@ -142,36 +202,56 @@
         onValue(dataRef, (snapshot) => {
           const labels = [];
           const temps = [], hums = [], pms = [], gases = [], pressures = [];
+          let latestData = null;
   
           snapshot.forEach((childSnapshot) => {
             const data = childSnapshot.val();
+            latestData = data; // Captures the most recent reading for the badges
+            
             //Convert UNIX timestamp from ESP8266 to local time string
             const timeString = new Date(data.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
   
             labels.push(timeString);
             temps.push(data.temperature);
             hums.push(data.humidity);
-            pms.push(data.pm25);
-            gases.push(data.gas / 1000);
+            pms.push(data.pm25_raw); // Updated to match your new payload key
+            gases.push(data.gas / 1000); 
             pressures.push(data.pressure);
-        });
-  
-        //Update Charts
-        envChart.data.labels = labels;
-        envChart.data.datasets[0].data = temps;
-        envChart.data.datasets[1].data = hums;
-        envChart.update();
-  
-        airChart.data.labels = labels;
-        airChart.data.datasets[0].data = pms;
-        airChart.data.datasets[1].data = gases;
-        airChart.update();
+          });
 
-        pressureChart.data.labels = labels;
-        pressureChart.data.datasets[0].data = pressures;
-        pressureChart.update();
-      });
-    }
+          // Update Top Status Badges with the newest reading
+          if (latestData) {
+            document.getElementById("pm-raw").innerText = latestData.pm25_raw;
+            updateEAQIBadge("pm-badge", latestData.pm25_eaqi);
+
+            document.getElementById("voc-pct").innerText = parseFloat(latestData.voc_pct).toFixed(1); 
+            document.getElementById("gas-raw").innerText = Math.round(latestData.gas); 
+            updateEAQIBadge("voc-badge", latestData.voc_eaqi);
+
+            document.getElementById("temp-val").innerText = parseFloat(latestData.temperature).toFixed(1);
+            document.getElementById("hum-val").innerText = parseFloat(latestData.humidity).toFixed(1);
+            document.getElementById("pres-val").innerText = parseFloat(latestData.pressure).toFixed(1);
+
+            const dateObj = new Date(latestData.timestamp * 1000);
+            document.getElementById("time-updated").innerText = dateObj.toLocaleString();
+          }
+  
+          //Update Historical Charts
+          envChart.data.labels = labels;
+          envChart.data.datasets[0].data = temps;
+          envChart.data.datasets[1].data = hums;
+          envChart.update();
+  
+          airChart.data.labels = labels;
+          airChart.data.datasets[0].data = pms;
+          airChart.data.datasets[1].data = gases;
+          airChart.update();
+
+          pressureChart.data.labels = labels;
+          pressureChart.data.datasets[0].data = pressures;
+          pressureChart.update();
+        });
+      }
     </script>
   </body>
 </html>
