@@ -42,6 +42,9 @@
       <div class="chart-container">
         <canvas id="airChart"></canvas>
       </div>
+      <div class="chart-container">
+        <canvas id="pressureChart"></canvas>
+      </div>
     </div>
 
     <!-- Firebase -->
@@ -71,7 +74,7 @@
       const dashboard = document.getElementById('dashboard');
       const errorMsg = document.getElementById('error-msg');
 
-      let envChart, airChart
+      let envChart, airChart, pressureChart;
 
       //Authentication Logic
       document.getElementById('login-btn').addEventListener('click', () => {
@@ -103,6 +106,7 @@
       function initCharts() {
         const ctxEnv = document.getElementById('envChart').getContext('2d');
         const ctxAir = document.getElementById('airChart').getContext('2d');
+        const ctxPress = document.getElementById('pressureChart').getContext('2d');
   
         envChart = new Chart(ctxEnv, {
           type: 'line',
@@ -121,6 +125,14 @@
           ]},
           options: { responsive: true, maintainAspectRatio: false }
         });
+
+        pressureChart = new Chart(ctxPress, {
+          type: 'line',
+          data: { labels: [], datasets: [
+            { label: 'Pressure (hPa)', borderColor: '#ffce56', data: [], tension: 0.4 }
+          ]},
+          options: { responsive: true, maintainAspectRatio: false }
+        });
       }
   
       function startDataListener() {
@@ -129,7 +141,7 @@
   
         onValue(dataRef, (snapshot) => {
           const labels = [];
-          const temps = [], hums = [], pms = [], gases = [];
+          const temps = [], hums = [], pms = [], gases = [], pressures = [];
   
           snapshot.forEach((childSnapshot) => {
             const data = childSnapshot.val();
@@ -141,6 +153,7 @@
             hums.push(data.humidity);
             pms.push(data.pm25);
             gases.push(data.gas / 1000);
+            pressures.push(data.pressure);
         });
   
         //Update Charts
@@ -153,6 +166,10 @@
         airChart.data.datasets[0].data = pms;
         airChart.data.datasets[1].data = gases;
         airChart.update();
+
+        pressureChart.data.labels = labels;
+        pressureChart.data.datasets[0].data = pressures;
+        pressureChart.update();
       });
     }
     </script>
