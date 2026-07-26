@@ -197,7 +197,7 @@
   
       function startDataListener() {
         //Pull the last 30 readings from Firebase 'room_data' node
-        const dataRef = query(ref(db, 'room_data'), limitToLast(30));
+        const dataRef = query(ref(db, 'room_data'), limitToLast(288));
   
         onValue(dataRef, (snapshot) => {
           const labels = [];
